@@ -5,11 +5,11 @@ import matplotlib.pyplot as plt
 
 from scipy.stats import poisson
 
-n_exp       = 50000     # number of experiments to simulate
+n_exp       = 5000      # number of experiments to simulate
 n_epochs    = 100       # number of epochs to simulated ("aquisition time")
 p_emission  = 0.96      # probability that an emission happens in one epoch
 
-phi_dec     = np.pi/16  # accepctance angle of the detector
+phi_dec     = 0.8923*np.pi/16  # accepctance angle of the detector
 
 start_seed  = 0
 
@@ -49,7 +49,11 @@ y = h[0]
 
 fig, ax = plt.subplots(1,1, figsize = (7,4))
 ax.bar(x, y/y.sum(), width = 1)
-ax.plot(x, poisson.pmf(x, exp_n_det), '.-', color = 'tab:orange')
+ax.plot(x, poisson.pmf(x, exp_n_det), '.-', color = 'tab:orange', 
+                       label = r'$P(n,\lambda = {0:.1f})$'.format(exp_n_det) + r'$= \frac{e^{-\lambda} \lambda^n}{n!}$')
+ax.set_xlabel('n')
+ax.set_title(f'histogram of number of detected events in {n_exp} experiments')
 ax.grid(ls = ':')
+ax.legend(loc = 'upper right')
 fig.tight_layout()
 fig.show()
