@@ -6,16 +6,18 @@ import pyparallelproj as ppp
 from pyparallelproj.phantoms import ellipse2d_phantom, brain2d_phantom
 from pyparallelproj.models import pet_fwd_model, pet_back_model
 
-from matplotlib.colors import LogNorm
+from scipy.ndimage import gaussian_filter
 import numpy as np
 import argparse
 
+plt.ion()
 plt.rcParams['image.cmap'] = 'Greys'
 
 def osem(em_sino, attn_sino, sens_sino, contam_sino, proj, niter,
          fwhm = 0, verbose = False, xstart = None, 
          callback = None, subset_callback = None,
-         callback_kwargs = None, subset_callback_kwargs = None, vmax = None):
+         callback_kwargs = None, subset_callback_kwargs = None, vmax = None, 
+         fig = None, ax = None, figdir = None):
 
   img_shape  = tuple(proj.img_dim)
 
@@ -35,13 +37,8 @@ def osem(em_sino, attn_sino, sens_sino, contam_sino, proj, niter,
   else:
     recon = xstart.copy()
 
-  plt.ion()
-  fig, ax = plt.subplots(2,5, figsize = (15,6))
-
-  ax[0,3].imshow(em_sino.squeeze().T, aspect = 'auto', vmin = 0, vmax = em_sino.max()) 
-
-  for axx in ax.ravel():
-    axx.set_axis_off()
+  if fig is not None:
+    ax[0,3].imshow(em_sino.squeeze().T, aspect = 'auto', vmin = 0, vmax = em_sino.max()) 
 
   # run OSEM iterations
   for it in range(niter):
@@ -55,34 +52,40 @@ def osem(em_sino, attn_sino, sens_sino, contam_sino, proj, niter,
                                fwhm = fwhm) + contam_sino[ss]
       ratio  = em_sino[ss] / exp_sino
 
-      if (it == 0) and (i == 0):
-        p14 = ax[1,4].imshow(recon.squeeze(), vmin = 0, vmax = vmax) 
-        p00 = ax[0,0].imshow(recon.squeeze(), vmin = 0, vmax = vmax) 
-      else:
-        p14.set_data(recon.squeeze()) 
-        p00.set_data(recon.squeeze()) 
+      if fig is not None:
+        if (it == 0) and (i == 0):
+          p14 = ax[1,4].imshow(recon.squeeze(), vmin = 0, vmax = vmax) 
+        else:
+          p14.set_data(recon.squeeze()) 
 
       back_ratio = pet_back_model(ratio, proj, attn_sino[ss], sens_sino[ss], i, fwhm = fwhm)
 
 
       recon *= (back_ratio / sens_img[i,...]) 
 
-      if (it == 0) and (i == 0):
-        p13 = ax[1,3].imshow(exp_sino.squeeze().T, aspect = 'auto', vmin = 0, vmax = em_sino.max()) 
-        p02 = ax[0,2].imshow(ratio.squeeze().T, aspect = 'auto', vmin = 0.8, vmax = 1.2) 
-        p01 = ax[0,1].imshow(back_ratio.squeeze(), 
-                             vmin = sens_img[i,...].min(), vmax = sens_img[i,...].max())
-        p11 = ax[1,1].imshow(sens_img[i,...].squeeze(),
-                             vmin = sens_img[i,...].min(), vmax = sens_img[i,...].max())
-        p10 = ax[1,0].imshow(recon.squeeze(), vmin = 0, vmax = vmax) 
-        fig.tight_layout()
-      else:
-        p13.set_data(exp_sino.squeeze().T)
-        p02.set_data(ratio.squeeze().T)
-        p01.set_data(back_ratio.squeeze())
-        p11.set_data(sens_img[i,...].squeeze())
-        p10.set_data(recon.squeeze()) 
+      if fig is not None:
+        if (it == 0) and (i == 0):
+          p13 = ax[1,3].imshow(exp_sino.squeeze().T, aspect = 'auto', vmin = 0, vmax = em_sino.max()) 
+          p02 = ax[0,2].imshow(ratio.squeeze().T, aspect = 'auto', vmin = 0.8, vmax = 1.2) 
+          p01 = ax[0,1].imshow(back_ratio.squeeze(), 
+                               vmin = sens_img[i,...].min(), 
+                               vmax = sens_img[i,...].max())
+          p11 = ax[1,1].imshow(sens_img[i,...].squeeze(),
+                               vmin = sens_img[i,...].min(), 
+                               vmax = sens_img[i,...].max())
+          p10 = ax[1,0].imshow(recon.squeeze(), vmin = 0, vmax = vmax) 
+          p00 = ax[0,0].imshow(back_ratio.squeeze()/sens_img[i,...].squeeze(), vmin = 0.5, vmax = 1.5) 
+          fig.tight_layout()
+        else:
+          p13.set_data(exp_sino.squeeze().T)
+          p02.set_data(ratio.squeeze().T)
+          p01.set_data(back_ratio.squeeze())
+          p11.set_data(sens_img[i,...].squeeze())
+          p00.set_data(back_ratio.squeeze()/sens_img[i,...].squeeze()) 
+          p10.set_data(recon.squeeze()) 
 
+        if (it < 10) or (it % 50) == 0:
+          fig.savefig(os.path.join(figdir,f'iteration_{it+1}.png'))
 
       if subset_callback is not None:
         subset_callback(recon, iteration = (it+1), subset = (i+1), **subset_callback_kwargs)
@@ -186,26 +189,8 @@ else:
 
   em_sino = img_fwd + contam_sino
 
-#-------------------------------------------------------------------------------------
-#-------------------------------------------------------------------------------------
-
-fig, ax = plt.subplots(1,3, figsize = (12,4))
-ax[0].imshow(img[...,n2//2],   vmin = 0, vmax = 1.3*img.max(), cmap = plt.cm.Greys)
-ax[0].set_title('ground truth')
-ir = ax[1].imshow(0*img[...,n2//2], vmin = 0, vmax = 1.3*img.max(), cmap = plt.cm.Greys)
-ax[1].set_title('recon')
-ib = ax[2].imshow(img[...,n2//2] - img[...,n2//2], vmin = -0.2*img.max(), vmax = 0.2*img.max(), 
-                  cmap = plt.cm.bwr)
-ax[2].set_title('bias')
-fig.tight_layout()
-
 #-----------------------------------------------------------------------------------------------
 # callback functions to calculate likelihood and show recon updates
-
-def update_img(x):
-  ir.set_data(x[...,n2//2])
-  ib.set_data(x[...,n2//2] - img[...,n2//2])
-  plt.pause(1e-6)
 
 def calc_cost(x):
   cost = 0
@@ -222,10 +207,20 @@ def _cb(x, **kwargs):
   """ This function is called by the iterative recon algorithm after every iteration 
       where x is the current reconstructed image
   """
+  plt.pause(1e-6)
   it = kwargs.get('iteration',0)
-  update_img(x)
   if 'cost' in kwargs:
     kwargs['cost'][it-1] = calc_cost(x)
+  if 'intermed_recons' in kwargs:
+    if it == 50:
+      kwargs['intermed_recons'][0,...] = x
+    if it == 100:
+      kwargs['intermed_recons'][1,...] = x
+    if it == 500:
+      kwargs['intermed_recons'][2,...] = x
+    if it == 1000:
+      kwargs['intermed_recons'][3,...] = x
+    
 
 #-----------------------------------------------------------------------------------------------
 # run the actual reconstruction using OSEM
@@ -234,22 +229,48 @@ def _cb(x, **kwargs):
 proj.init_subsets(nsubsets)
 
 cost_osem = np.zeros(niter)
-cbk       = {'cost':cost_osem}
 
-init_recon = 0*img + img.mean()
+intermed_recons = np.zeros((4,) + img.shape)
+cbk       = {'cost':cost_osem, 'intermed_recons':intermed_recons}
+
+init_recon = np.full(img.shape, np.percentile(img,90), dtype = np.float32)
+
+fig_osem, ax_osem = plt.subplots(2,5, figsize = (15,6))
+for axx in ax_osem.ravel(): axx.set_axis_off()
+
+figdir = f'mlem_iterations_{counts:.1e}'
+if not os.path.exists(figdir): os.makedirs(figdir)
 
 recon_osem = osem(em_sino, attn_sino, sens_sino, contam_sino, proj, niter, 
                   fwhm = fwhm, verbose = True, xstart = init_recon, vmax = 1.2*img.max(),
                   callback = _cb, callback_kwargs = cbk)
+                  #fig = fig_osem, ax = ax_osem, figdir = figdir)
 
 #-----------------------------------------------------------------------------------------------
 # plot the cost function
 
-init_cost = calc_cost(init_recon) 
-ref_cost  = cost_osem[-1]
-fig2, ax2 = plt.subplots(1,1, figsize = (6,4))
-ax2.semilogy(np.arange(1,niter+1), (cost_osem - ref_cost) / (init_cost - ref_cost), '.-')
+fig2, ax2 = plt.subplots(1,1, figsize = (5,3))
+ax2.loglog(np.arange(1,niter+1), -cost_osem, '.-')
+ax2.set_ylim(-cost_osem[3],-cost_osem[-1] + 0.1*(-cost_osem[-1]+cost_osem[2]))
+ax2.set_ylabel('Poisson log-likelihood')
 ax2.set_xlabel('iteration')
-ax2.set_ylabel('relative cost')
+ax2.grid(ls = ':')
 fig2.tight_layout()
+fig2.savefig(os.path.join(figdir,'logL.png'))
 fig2.show()
+
+fig3, ax3 = plt.subplots(2,4, figsize = (11,6))
+iters = [50,100,500,1000]
+ps_fwhm_mm = 4.5
+for i in range(4):
+  ax3[0,i].imshow(intermed_recons[i,:,20:-20,0], vmin = 0, vmax = 1.2*img.max())
+  ax3[1,i].imshow(gaussian_filter(intermed_recons[i,:,20:-20,0],ps_fwhm_mm/(2.35*voxsize[:2])),                  vmin = 0, vmax = 1.2*img.max())
+  ax3[0,i].set_title(f'{iters[i]} updates', fontsize = 'small')
+  ax3[1,i].set_title(f'{ps_fwhm_mm}mm smoothed', fontsize = 'small')
+for axx in ax3.ravel():
+  axx.set_axis_off()
+fig3.tight_layout()
+fig3.savefig(os.path.join(figdir,'conv.png'))
+fig3.show()
+
+
