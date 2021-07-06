@@ -3,6 +3,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import ticker, cm
 from scipy.optimize import minimize, Bounds
 
 def f(x, A, y, b):
@@ -15,6 +16,32 @@ def fprime(x, A, y, b):
   ybar = (A @ x) + b
 
   return A.transpose() @ (1 - y/ybar)
+
+#---------------------------------------------------------------------------------------------
+def hessian(x, A, y, b):
+  ybar = (A @ x) + b
+
+  n = x.shape[0]
+  H = np.zeros((n,n))
+
+  for i in range(n):
+    for j in range(n):
+      H[i,j] = (A[:,i]*A[:,j]*y/(ybar**2)).sum()
+
+  return H
+
+#---------------------------------------------------------------------------------------------
+def newton(x0,A,y,b, niter = 10):
+
+  x = x0.copy()
+
+  xn = [[x.copy(),f(x,A,y,b)]]
+
+  for i in range(niter):
+    x = np.clip(x - np.linalg.inv(hessian(x,A,y,b)) @ fprime(x, A, y, b), 0, None)
+    xn.append([x.copy(),f(x,A,y,b)])
+
+  return xn
 
 #---------------------------------------------------------------------------------------------
 def mlem(x0, A, y, b, niter = 10):
@@ -49,7 +76,7 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
   z    = A.transpose() @ y
   zbar = z.copy()
 
-  xp = [[x.copy(),f(x,A,y,b)]]
+  xp = [[x.copy(),f(x,A,m,b)]]
 
   for i in range(niter):
     x = np.clip(x - T*zbar, 0, None)
@@ -76,7 +103,7 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
 
 
 # input parameters
-niter = 50
+niter = 70
 sens  = 3.
 noise = True
 # additive contaminations in fwd model A@x + b
@@ -85,7 +112,7 @@ b     = 0.1
 xdata = np.array([3.,5.])
 
 # forward operator
-A = sens*np.array([[6.,1.],[0,3.],[2.,2.]])
+A = sens*np.array([[6.,0.1],[0.1,3.],[2.,2.]])
 
 #---------------------------------------------------------------------------------------------
 
@@ -113,10 +140,13 @@ lb_res = minimize(f, x0, method = 'L-BFGS-B', jac = fprime, args = (A,y,b), call
 # MLEM
 xm = mlem(x0, A, y, b, niter = niter)
 
+# full Newton method using hessian
+xn = newton(x0, A, y, b, niter = niter)
+
 # PDHG - gamma should be approx 1 / mean of solution
-xp  = PDHG(x0, A, y, b, gamma = 1./xdata.mean(), niter = niter, precond = True)
-xp2 = PDHG(x0, A, y, b, gamma = 0.3/xdata.mean(), niter = niter, precond = True)
-xp3 = PDHG(x0, A, y, b, gamma = 3./xdata.mean(), niter = niter, precond = True)
+xp  = PDHG(x0, A, y, b, gamma = 1./xdata.max(), niter = niter, precond = True)
+xp2 = PDHG(x0, A, y, b, gamma = 0.3/xdata.max(), niter = niter, precond = True)
+xp3 = PDHG(x0, A, y, b, gamma = 3./xdata.max(), niter = niter, precond = True)
 
 #----------------------------------------------------------------------------------------------
 # show convergence of cost functions
@@ -125,8 +155,9 @@ fm  = np.array([x[1] for x in xm])
 fp  = np.array([x[1] for x in xp])
 fp2 = np.array([x[1] for x in xp2])
 fp3 = np.array([x[1] for x in xp3])
+fn  = np.array([x[1] for x in xn])
 
-fmin  = min(fl.min(),fm.min(),fp.min(),fp2.min(),fp3.min())
+fmin  = min(fl.min(),fm.min(),fp.min(),fp2.min(),fp3.min(),fn.min())
 
 fig, ax = plt.subplots(1,2, figsize = (10,5))
 ax[0].semilogy(np.arange(len(xl)), fl - fmin, '.-', label = 'L-BFGS-B')
@@ -134,6 +165,7 @@ ax[0].semilogy(np.arange(len(xm)), fm - fmin, '.-', label = 'MLEM')
 ax[0].semilogy(np.arange(len(xp)), fp - fmin, '.-', label = 'PDHG - gam: 1 / ||x||')
 ax[0].semilogy(np.arange(len(xp2)),fp2 - fmin, '.-', label = 'PDHG - gam: 0.3 / ||x||')
 ax[0].semilogy(np.arange(len(xp3)), fp3 - fmin, '.-', label = 'PDHG - gam: 3 / ||x||')
+ax[0].semilogy(np.arange(len(xn)), fn - fmin, '.-', label = 'Newton w. full Hessian')
 ax[0].grid(':')
 ax[0].legend()
 ax[0].set_xlabel('iteration')
@@ -144,20 +176,21 @@ ax[0].set_ylabel('-logL + logL(x*)')
 n1 = 100
 n2 = 120
 F = np.zeros((n1,n2))
-xx = np.linspace(xdata[0]/100, 2*xdata[0], n1)
-yy = np.linspace(xdata[1]/100, 2*xdata[1], n2)
+xx = np.linspace(min(xdata[0],x0[0])/100, 1.5*max(xdata[0],x0[0]), n1)
+yy = np.linspace(min(xdata[1],x0[1])/100, 1.5*max(xdata[1],x0[1]), n2)
 
 for i, xt0 in enumerate(xx):
   for k, xt1 in enumerate(yy):
     F[i,k] = f(np.array([xt0,xt1]), A, y, b)
 
-ax[1].contour(yy, xx, F - fmin, levels = 100, colors = 'k', linewidths = 0.5)
+ax[1].contour(yy, xx, np.log(F - fmin + 1), levels = 50, colors = 'k', linewidths = 0.5)
 ax[1].grid(':')
 ax[1].plot([x[0][1] for x in xl], [x[0][0] for x in xl], '.-')
 ax[1].plot([x[0][1] for x in xm], [x[0][0] for x in xm], '.-')
 ax[1].plot([x[0][1] for x in xp], [x[0][0] for x in xp], '.-')
 ax[1].plot([x[0][1] for x in xp2], [x[0][0] for x in xp2], '.-')
 ax[1].plot([x[0][1] for x in xp3], [x[0][0] for x in xp3], '.-')
+ax[1].plot([x[0][1] for x in xn], [x[0][0] for x in xn], '.-')
 ax[1].set_ylabel('x0')
 ax[1].set_xlabel('x1')
 
