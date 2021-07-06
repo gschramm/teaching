@@ -73,25 +73,19 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
   x = x0.copy()
   y = np.zeros(A.shape[0])
 
-  z    = A.transpose() @ y
-  zbar = z.copy()
-
   xp = [[x.copy(),f(x,A,m,b)]]
 
   for i in range(niter):
-    x = np.clip(x - T*zbar, 0, None)
+    x_plus = np.clip(x - T*(A.transpose() @ y), 0, None)
     
-    y_plus = y + S*((A @ x) + b)
+    y_plus = y + S*((A @ (2*x_plus - x)) + b)
     
     # apply the prox for the dual of the poisson logL
     y_plus = 0.5*(y_plus + 1 - np.sqrt((y_plus - 1)**2 + 4*S*m))
    
-    dz = A.transpose() @ (y_plus - y)
-    
     # update variables
-    z     = z + dz
-    zbar  = z + dz
-    y     = y_plus.copy()
+    x = x_plus.copy()
+    y = y_plus.copy()
 
     xp.append([x.copy(),f(x,A,m,b)])
 
