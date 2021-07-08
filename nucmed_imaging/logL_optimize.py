@@ -11,6 +11,14 @@ def f(x, A, y, b):
 
   return (ybar - y*np.log(ybar)).sum()
 
+def fdual(y, m):
+  if y.max() <= 1:
+    r = (-m + m*np.log(m/(1-y))).sum()
+  else:
+    r = np.inf
+
+  return r
+
 #---------------------------------------------------------------------------------------------
 def fprime(x, A, y, b):
   ybar = (A @ x) + b
@@ -73,7 +81,7 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
   x = x0.copy()
   y = np.zeros(A.shape[0])
 
-  xp = [[x.copy(),f(x,A,m,b)]]
+  xp = [[x.copy(), f(x,A,m,b), y.copy(), -fdual(y,m) + (b*y).sum()]]
 
   for i in range(niter):
     x_plus = np.clip(x - T*(A.transpose() @ y), 0, None)
@@ -87,7 +95,7 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
     x = x_plus.copy()
     y = y_plus.copy()
 
-    xp.append([x.copy(),f(x,A,m,b)])
+    xp.append([x.copy(), f(x,A,m,b), y.copy(), -fdual(y,m) + (b*y).sum()])
 
   return xp
 
@@ -97,13 +105,13 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
 
 
 # input parameters
-niter = 70
+niter = 100
 sens  = 3.
 noise = True
 # additive contaminations in fwd model A@x + b
-b     = 0.1 
+b     = 1
 
-xdata = np.array([3.,5.])
+xdata = np.array([5.,3.])
 
 # forward operator
 A = sens*np.array([[6.,0.1],[0.1,3.],[2.,2.]])
@@ -116,9 +124,11 @@ np.random.seed(1)
 norm_A = np.sqrt(np.linalg.eig(A.transpose()@A)[0].max())
 
 y = (A @ xdata) + b
+print(y)
 
 if noise:
   y = np.random.poisson(y)
+print(y)
 
 # choose initial recon
 x0 = (A.transpose() @ y) / (norm_A**2)
@@ -153,7 +163,7 @@ fn  = np.array([x[1] for x in xn])
 
 fmin  = min(fl.min(),fm.min(),fp.min(),fp2.min(),fp3.min(),fn.min())
 
-fig, ax = plt.subplots(1,2, figsize = (10,5))
+fig, ax = plt.subplots(1,3, figsize = (12,4))
 ax[0].semilogy(np.arange(len(xl)), fl - fmin, '.-', label = 'L-BFGS-B')
 ax[0].semilogy(np.arange(len(xm)), fm - fmin, '.-', label = 'MLEM')
 ax[0].semilogy(np.arange(len(xp)), fp - fmin, '.-', label = 'PDHG - gam: 1 / ||x||')
@@ -187,6 +197,15 @@ ax[1].plot([x[0][1] for x in xp3], [x[0][0] for x in xp3], '.-')
 ax[1].plot([x[0][1] for x in xn], [x[0][0] for x in xn], '.-')
 ax[1].set_ylabel('x0')
 ax[1].set_xlabel('x1')
+
+# plot primal dual Gaps for PDHGs
+cols = plt.rcParams['axes.prop_cycle'].by_key()['color']
+ax[2].semilogy([abs(xp[x][-1] - xp[x][-3]) for x in range(1,niter+1)], '.-', color = cols[2])
+ax[2].semilogy([abs(xp2[x][-1] - xp2[x][-3]) for x in range(1,niter+1)], '.-', color = cols[3])
+ax[2].semilogy([abs(xp3[x][-1] - xp3[x][-3]) for x in range(1,niter+1)], '.-', color = cols[4])
+ax[2].set_xlabel('iteration')
+ax[2].set_ylabel('primal dual gap')
+ax[2].grid(':')
 
 fig.tight_layout()
 fig.show()
