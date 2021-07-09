@@ -13,7 +13,8 @@ def f(x, A, y, b):
 
 def fdual(y, m):
   if y.max() <= 1:
-    r = (-m + m*np.log(m/(1-y))).sum()
+    inds = np.where(m > 0)
+    r = (-m[inds] + m[inds]*np.log(m[inds]/(1-y[inds]))).sum()
   else:
     r = np.inf
 
@@ -68,7 +69,7 @@ def mlem(x0, A, y, b, niter = 10):
   return xm
 
 #---------------------------------------------------------------------------------------------
-def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
+def PDHG(x0, A, m, b, niter = 15, rho = 1.0, gamma = 1., precond = True):
 
   if precond:
     S = gamma*rho/(A @ np.ones(A.shape[1]))
@@ -79,7 +80,7 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
     T = rho/(gamma*norm_A)
 
   x = x0.copy()
-  y = np.zeros(A.shape[0])
+  y = (m == 0).astype(np.float)
 
   xp = [[x.copy(), f(x,A,m,b), y.copy(), -fdual(y,m) + (b*y).sum()]]
 
@@ -106,25 +107,28 @@ def PDHG(x0, A, m, b, niter = 15, rho = 1., gamma = 1., precond = False):
 
 # input parameters
 niter = 100
-sens  = 3.
+sens  = 2.
+seed  = 1
 noise = True
-# additive contaminations in fwd model A@x + b
-b     = 1
 
 xdata = np.array([5.,3.])
 
 # forward operator
 A = sens*np.array([[6.,0.1],[0.1,3.],[2.,2.]])
 
+# additive contaminations in fwd model A@x + b
+b = np.full(A.shape[0], sens/3)
 #---------------------------------------------------------------------------------------------
 
-np.random.seed(1)
+np.random.seed(seed)
 
 # operator norm (largest eigenvalue)
 norm_A = np.sqrt(np.linalg.eig(A.transpose()@A)[0].max())
 
 y = (A @ xdata) + b
 print(y)
+
+
 
 if noise:
   y = np.random.poisson(y)
@@ -148,9 +152,10 @@ xm = mlem(x0, A, y, b, niter = niter)
 xn = newton(x0, A, y, b, niter = niter)
 
 # PDHG - gamma should be approx 1 / mean of solution
-xp  = PDHG(x0, A, y, b, gamma = 1./xdata.max(), niter = niter, precond = True)
-xp2 = PDHG(x0, A, y, b, gamma = 0.3/xdata.max(), niter = niter, precond = True)
-xp3 = PDHG(x0, A, y, b, gamma = 3./xdata.max(), niter = niter, precond = True)
+precond = True
+xp  = PDHG(x0, A, y, b, gamma = 1./xdata.max(), niter = niter, precond = precond)
+xp2 = PDHG(x0, A, y, b, gamma = 0.3/xdata.max(), niter = niter, precond = precond)
+xp3 = PDHG(x0, A, y, b, gamma = 3./xdata.max(), niter = niter, precond = precond)
 
 #----------------------------------------------------------------------------------------------
 # show convergence of cost functions
